@@ -1,0 +1,330 @@
+---
+title: "BIOST 537 Problem Set3"
+author: "Ivy Zhang"
+date: "2/9/2022"
+output: pdf_document
+---
+```{r include = F}
+knitr::opts_chunk$set(echo = FALSE, warning = F, message = F)
+```
+
+# Problem 1 
+
+```{r}
+#1(a)
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+wdbc <- read.csv("~/Desktop/R hw/wdbc.data", header=FALSE)[,-1]
+colnames(wdbc)= c("diagnosis", paste0("X",1:30))
+wdbc$diagnosis = factor(wdbc$diagnosis, levels = c("B","M"), labels = c("Benign","Malignant"))
+n = nrow(wdbc)
+n_pr = ncol(wdbc) - 1
+n_m = wdbc%>%group_by(diagnosis)%>%summarize(n = n())
+
+```
+
+## 1(a)
+
+This data contains 30 predictors with a sample size of 569. We have 357 observations in Benign class and 212 observations in Malignant class. 
+
+## 1(b)
+
+Process will be shown in the appendix code section.
+
+```{r}
+#1(b)
+set.seed(2)
+train_ids = sample(nrow(wdbc), 400)
+test_ids = seq(nrow(wdbc))[-train_ids]
+train_df = wdbc[train_ids,] 
+test_df = wdbc[test_ids,]
+```
+
+## 1(c)
+
+Normalize process will be shown in the appendix code section. The reason why we want to perform this step seprately in the training set and test set is because we want these two sets should be normalized independently from each other. We don't want to make the test set normalized affected by the training set, therefore we can have test performance to be more accurate since it should not be biased by the training set.  
+
+```{r}
+#1(c)
+train.num = scale(train_df[,-1])
+test.num = scale(test_df[,-1])
+```
+
+
+## 1(d)
+
+```{r}
+#1(d)
+library(ggcorrplot)
+library(ggplot2)
+corr = cor(train.num)
+ggcorrplot(corr)+ggtitle("Correlation Matrix of Training Predictors")
+```
+
+From the previous plot, we can clearly see, X1, X3, X4, X20, X23 and X24 are highly correlated with almost correlation equals to 1. Besides these variables, there are some variables are relatively high correlated (e.g: X8 vs X28, X7 as X8). It means we may have collinearity of predictors problem in our data. Our model using all variables may multiple least squares solutions and will also affect other predictors estimation. 
+
+## 1(e)
+
+```{r}
+#1(e)
+library(tidyr)
+library(knitr)
+train_df[,c(2:31)] = train.num
+test_df[,c(2:31)] = test.num
+glm.1 = glm(diagnosis~., data = train_df, family = binomial(link = "logit") )
+kable(round(summary(glm.1)$coefficients,3), 
+      caption = "Estimated Coefficients of Simple Logistic Regression Using All Predictors")
+corr_13 = summary(glm.1, correlation = TRUE)$correlation[2,4]
+```
+
+From the previous table, we can see that the relatively larger magnitude of X1 and X3 coefficients are similar but one is positive and one is negative. They also have relatively larger standard errors. It also fits the characteristics of the collinearity of the predictors we talked about during the class. Therefore, it leads to the instability of the coefficient estiamtes in the model and we overestimate the coefficients of these predictors. 
+
+## 1(f)
+
+```{r}
+#1(f)
+glm.prob.train = predict(glm.1, type = "response")
+glm.label.train = rep("Benign", nrow(train_df))
+glm.label.train[glm.prob.train > .5] = "Malignant"
+tt.glm.train = table(True = glm.label.train, Predicted = train_df$diagnosis)
+kable(tt.glm.train, caption = " Confusion Matrix of Training Set")
+glm.prob.test = predict(glm.1,type = "response", newdata = test_df)
+glm.label.test = rep("Benign", nrow(test_df))
+glm.label.test[glm.prob.test > .5] = "Malignant"
+tt.glm.test = table(glm.label.test, test_df$diagnosis)
+kable(tt.glm.test, caption = " Confusion Matrix of Test Set")
+accuracy_train = mean(glm.label.train == train_df$diagnosis)*100
+accuracy_test = mean(glm.label.test == test_df$diagnosis)*100
+```
+
+From the confusion matrix of the training set, we can see there is no missclassification error for whole training set, and the overall accurate rate is `r round(accuracy_test,3)` for the testing set. However, none misclassification may help us noticing there is a problem of overfitting. 
+
+# Problem 2: Ridge Logistic Regression 
+
+## 2(a)
+
+The process will be shown in the appendix code section.
+```{r}
+#2(a)
+X_train = as.matrix(train_df[,-1])
+y_train = as.factor(train_df[,1])
+X_test = as.matrix(test_df[,-1])
+y_test = as.factor(test_df[,1])
+```
+
+## 2(b)
+
+The process will be shown in the appendix code section.
+```{r}
+#2(b)
+library(glmnet)
+grid = 10^seq(5,-18,length=100)
+ridge.mod = glmnet(X_train, y_train, alpha=0,lambda = grid,thresh =1e-8, family = "binomial")
+```
+
+## 2(c)
+
+```{r}
+#2(c)
+beta_13 = t(ridge.mod$beta[c("X1","X3"),])
+beta_13 = cbind(beta_13, log(ridge.mod$lambda))
+colnames(beta_13)[3] = "Log-Lambda"
+
+plot(data = as.data.frame(as.matrix(beta_13)), X1~`Log-Lambda`, type = "l", col = "purple",
+      ylab = "Coefficients Estimate", 
+     main = "Coefficients vs. Log(lambda) for Ridge Logistic Regression",
+     lwd = 2)
+lines(data = as.data.frame(as.matrix(beta_13)), X3~`Log-Lambda`, type = "l", col = "gold",lwd = 2)
+legend("bottomright",legend = c("X1 Estimate","X3 Estimate"), col = c("purple","gold"),
+       lty = 1)
+
+  
+```
+As log-lambda increase, both of the estimation are more towards to 0. The rate of X1 estimate going toward 0 is much higher than the X3 estimate. X1 estimate increase rapidly when log-lambda equals from -25 to -10. X3 estimate almost constatn when log-lambda smaller than -20, and increase after that. When Log-Lambda is around -10, both of the estimates are nearly equals to 0. 
+
+## 2(d)
+
+```{r}
+#2(d)
+cv.out = cv.glmnet(x = as.matrix(X_train), y = y_train, alpha=0,lambda = grid,thresh =1e-8, 
+                   family = "binomial",
+                   type.measure = "class" )
+plot(cv.out, main = "Misclassification Errod vs.Log-Lambda for Ridge Regression")
+bestlam = cv.out$lambda.min 
+
+```
+The optimal lambda is `r round(bestlam,3)`, with log-lambda equals to `r round(log(bestlam),3)`.
+
+## 2(e)
+
+```{r}
+#2(e)
+best_mod = glmnet(X_train,y_train,alpha =0, lambda = bestlam, family = "binomial",thresh =1e-8)
+num_coef = sum(as.matrix(best_mod$beta)!=0)
+```
+
+We estimate that the number of coefficients that are different from 0 for the ridge model is `r num_coef`. It seemed to make sense since ridge regression only shrink all regression coeeficients toward to zero but will not give a set of zerio regression coefficients like LASSO does. 
+
+## 2(f)
+
+```{r}
+#2(f)
+ridge.prob.train = predict(best_mod, type = "response",newx = X_train)
+ridge.label.train = rep("Benign", nrow(train_df))
+ridge.label.train[ridge.prob.train > .5] = "Malignant"
+tt.ridge.train = table(True = ridge.label.train, Predicted = y_train)
+kable(tt.glm.train, caption = " Confusion Matrix of Training Set")
+ridge.prob.test = predict(best_mod,type = "response", newx = X_test)
+ridge.label.test = rep("Benign", nrow(X_test))
+ridge.label.test[ridge.prob.test > .5] = "Malignant"
+tt.ridge.test = table(ridge.label.test, y_test)
+kable(tt.ridge.test, caption = " Confusion Matrix of Test Set")
+accuracy_ridge = mean(ridge.label.test == y_test) *100
+```
+
+We have a prediction accuracy of 100% in the training set and `r round(accuracy_ridge,3)`% prediction accuracy in the test set. Although 100% training set prediction accuracy seemed to be overfitting, the test set prediction accuracy is also incredibly high. Because we are randomly splitting the training set and the test set, and this model does well on both, we can say this model overall is giving very good prediction. 
+
+
+## 2(g)
+
+```{r}
+#2(g)
+n_segm = 20
+TPR = replicate(n_segm, 0)
+FPR = replicate(n_segm, 0)
+p_th = seq(0,1,length.out = n_segm)
+for (i in 1:n_segm)
+{
+  ridge.label.test = rep("Benign", nrow(test_df))
+  ridge.label.test[ridge.prob.test > p_th[i]] = "Malignant"
+  
+  tt.ridge.test = table(ridge.label.test, test_df$diagnosis)
+  TPR[i] = mean(ridge.label.test[test_df$diagnosis == 'Malignant'] == test_df$diagnosis[test_df$diagnosis == 'Malignant'])
+  FPR[i] = mean(ridge.label.test[test_df$diagnosis == 'Benign'] != test_df$diagnosis[test_df$diagnosis == 'Benign'])
+}
+ggplot() + geom_path(aes(x = FPR, y = TPR))
+
+
+```
+
+## 2(h)
+```{r}
+#2(h)
+library(pracma)
+auc = abs(trapz(FPR, TPR))
+```
+
+We calculated the AUC for ridge regression is `r round(auc,3)``. 
+
+# Problem 3: LASSO
+
+## 3(b)
+
+The process will be shown in the appendix code section.
+```{r}
+#3(b)
+lasso.mod = glmnet(X_train, y_train, alpha=1,lambda = grid,thresh =1e-8, family = "binomial")
+```
+
+## 3(c)
+
+```{r}
+#3(c)
+beta_13 = t(lasso.mod$beta[c("X1","X3"),])
+beta_13 = cbind(beta_13, log(lasso.mod$lambda))
+colnames(beta_13)[3] = "Log-Lambda"
+
+plot(data = as.data.frame(as.matrix(beta_13)), X1~`Log-Lambda`, type = "l", col = "purple",
+      ylab = "Coefficients Estimate", 
+     main = "Coefficients vs. Log(lambda) for Lasso Regression",
+     lwd = 2)
+lines(data = as.data.frame(as.matrix(beta_13)), X3~`Log-Lambda`, type = "l", col = "gold",lwd = 2)
+legend("bottomright",legend = c("X1 Estimate","X3 Estimate"), col = c("purple","gold"),
+       lty = 1)
+```
+
+As log-lambda increase, the X1 estimate is more towards to 0. X1 estimate increase rapidly when log-lambda equals from -20 to -10, and equals to 0 when log-lambda is larger than (around)-8. X3 estimate is always zero for the whole time.  
+
+## 3(d)
+
+```{r}
+#3(d)
+cv.out.lasso = cv.glmnet(x = as.matrix(X_train), y = y_train, alpha=1,lambda = grid,thresh =1e-8, 
+                   family = "binomial",
+                   type.measure = "class" )
+plot(cv.out.lasso, main = "Misclassification Errod vs.Log-Lambda for LASSO Regression")
+bestlam.lasso = cv.out.lasso$lambda.min 
+
+```
+The optimal lambda is `r round(bestlam,3)`, with log-lambda equals to `r round(log(bestlam.lasso),3)`.
+
+## 3(e)
+
+```{r}
+#3(e)
+best_mod_lasso = glmnet(X_train,y_train,alpha =1, lambda = bestlam.lasso, family = "binomial",thresh =1e-8)
+num_coef = sum(as.matrix(best_mod$beta)!=0)
+```
+
+We estimate that the number of coefficients that are different from 0 for the LASSO model is `r num_coef`. It seemed to make sense because LASSO regression will push the estimated coefficients to 0 when lambda becomes larger. 
+
+## 3(f)
+
+```{r}
+#3(f)
+lasso.prob.train = predict(best_mod_lasso, type = "response",newx = X_train)
+lasso.label.train = rep("Benign", nrow(train_df))
+lasso.label.train[lasso.prob.train > .5] = "Malignant"
+tt.lasso.train = table(True = lasso.label.train, Predicted = y_train)
+kable(tt.glm.train, caption = " Confusion Matrix of Training Set")
+lasso.prob.test = predict(best_mod_lasso,type = "response", newx = X_test)
+lasso.label.test = rep("Benign", nrow(X_test))
+lasso.label.test[lasso.prob.test > .5] = "Malignant"
+tt.lasso.test = table(lasso.label.test, y_test)
+kable(tt.lasso.test, caption = " Confusion Matrix of Test Set")
+accuracy_lasso = mean(lasso.label.test == y_test) *100
+```
+
+We have a prediction accuracy of 100% in the training set and `r round(accuracy_lasso,3)`% prediction accuracy in the test set. Although 100% training set prediction accuracy seemed to be overfitting, the test set prediction accuracy is also incredibly high. Because we are randomly splitting the training set and the test set, and this model does well on both, we can say this model overall is giving very good prediction. 
+
+
+## 3(g)
+
+```{r}
+#2(g)
+n_segm = 20
+TPR = replicate(n_segm, 0)
+FPR = replicate(n_segm, 0)
+p_th = seq(0,1,length.out = n_segm)
+for (i in 1:n_segm)
+{
+  lasso.label.test = rep("Benign", nrow(test_df))
+  lasso.label.test[lasso.prob.test > p_th[i]] = "Malignant"
+  
+  tt.lasso.test = table(lasso.label.test, test_df$diagnosis)
+  TPR[i] = mean(lasso.label.test[test_df$diagnosis == 'Malignant'] == test_df$diagnosis[test_df$diagnosis == 'Malignant'])
+  FPR[i] = mean(lasso.label.test[test_df$diagnosis == 'Benign'] != test_df$diagnosis[test_df$diagnosis == 'Benign'])
+}
+ggplot() + geom_path(aes(x = FPR, y = TPR))
+
+
+```
+
+## 3(h)
+```{r}
+#3(h)
+auc = abs(trapz(FPR, TPR))
+```
+
+We calculated the AUC for LASSO regression is `r round(auc,3)`. 
+
+# Problem 4
+
+All of these three models giving a 100% accuracy rate in the training set. However, for LASSO and ridge models, these models are giving better accuracy rate than the simple glm does. The auc of LASSO can reach to 0.999 which is very high and the auc of the ridge can reach to 0.991, showing these two models are doing better job in prediction compared to simple glm (with LASSO doing the best). In addition, LASSO only used 15 predictors but ridge used 30. Therefore, LASSO model is a simpler model with higher auc. The LASSO model is simpler also means that it is easier for us to interpret the LASSO model compared to the rest two models. 
+
+\pagebreak
+
+```{r, ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE}
+```
